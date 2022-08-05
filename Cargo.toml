@@ -1,0 +1,21 @@
+[package]
+name = "proglog"
+authors = ["Seth Stadick <sstadick@gmail.com>"]
+version = "0.1.0"
+edition = "2021"
+license = "Unlicense/MIT"
+readme = "README.md"
+documentation = "https://docs.rs/proglog"
+homepage = "https://github.com/sstadick/proglog"
+repository = "https://github.com/sstadick/proglog"
+categories = ["concurrency"]
+keywords = ["logging", "concurrency", "log"]
+description = "Thread safe progress logging"
+
+[dependencies]
+log = "0.4.17"
+
+[dev-dependencies]
+env_logger = "0.9.0"
+rayon = "1.5.3"
+logtest = "2.0.0"
