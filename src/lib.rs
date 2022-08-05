@@ -236,6 +236,7 @@ impl Drop for ProgLog {
     }
 }
 
+/// The builder for [`ProgLog`].
 pub struct ProgLogBuilder {
     name: String,
     noun: String,
@@ -245,35 +246,42 @@ pub struct ProgLogBuilder {
 }
 
 impl ProgLogBuilder {
+    /// Create a new [`ProgLogBuilder`].
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// The name of the logger, used so that multiple progress loggers can run at once.
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.name = name.into();
         self
     }
 
+    /// The noun used in the log output string format, ideally lowercase and plural.
     pub fn noun(mut self, noun: impl Into<String>) -> Self {
         self.noun = noun.into();
         self
     }
 
+    /// The verb used in the log output string format, ideally capitalized.
     pub fn verb(mut self, verb: impl Into<String>) -> Self {
         self.verb = verb.into();
         self
     }
 
+    /// How many items must be seen before emitting a log message.
     pub fn unit(mut self, unit: u64) -> Self {
         self.unit = unit;
         self
     }
 
+    /// The [`log::Level`] at which to emit log messages.
     pub fn level(mut self, level: Level) -> Self {
         self.level = level;
         self
     }
 
+    /// Build the [`ProgLog`] instance.
     pub fn build(self) -> ProgLog {
         ProgLog::new(self.name, self.noun, self.verb, self.unit, self.level)
     }
