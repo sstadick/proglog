@@ -1,5 +1,7 @@
 //! This is a simple, thread-safe, count-based, progress logger.
 //!
+//! This progress logger is intended to be as low-overhead as possible so that it can be used in [hot-loops](#things-to-know).
+//!
 //! # Synopsis
 //!
 //! `proglog` hooks into your existing `log` implementation (i.e. `env_logger`) and will output a log message every `unit` number of items it has seen.
@@ -48,16 +50,53 @@ static DEFAULT_VERB: &str = "Processed";
 static DEFAULT_UNIT: u64 = 100_000;
 static DEFAULT_LEVEL: Level = Level::Info;
 
+/// [`ProgLog`] is the the progress logger.
+///
+/// `ProgLog` hooks into your underlying logger implementation and will emit a
+/// log message every time the counter hits a multiple of `unit` at the indicated
+/// `level`.
+///
+/// There are two primary methods for incrementing the counter:
+///
+/// - [`ProgLog::record`]
+/// - [`ProgLog::record_with`]
+///
+/// Both of these methods will increment the counter and check to see if a log
+/// message should be emitted.
+///
+/// The structure of output messages will look like:
+///
+/// ```text
+/// [{name}] {verb} {seen} {noun}: {meta}
+/// ```
+///
+/// where `meta` is anything returned by the closure given to [`ProgLog::record_with`].
+/// `seen` is the number of items counted so far.
+///
+/// A log message can be force-written by calling [`ProgLog::flush`]/[`ProgLog::flush_with`].
+/// Calling flush does not end the logger, another log message will be written on drop.
+/// Additionally, flush will be called on drop.
+///
+/// **Note**: `unit` should be adjusted so that you emit ~1 log message every 15 seconds.
+/// If `unit` is too small and this is in a hot-loop logging will happen too frequently
+/// and impact performance.
 pub struct ProgLog {
+    /// The counter tracks the number of items seen by the logger.
     counter: Arc<AtomicU64>,
+    /// The name of the logger, used so that multiple progress loggers can run at once.
     name: String,
+    /// The noun used in the log output string format, ideally lowercase and plural.
     noun: String,
+    /// The verb used in the log output string format, ideally capitalized.
     verb: String,
+    /// How many items must be seen before emitting a log message.
     unit: u64,
+    /// The [`log::Level`] at which to emit log messages.
     level: Level,
 }
 
 impl Default for ProgLog {
+    /// Default for [`ProgLog`].
     fn default() -> Self {
         Self {
             counter: Default::default(),
@@ -71,6 +110,9 @@ impl Default for ProgLog {
 }
 
 impl ProgLog {
+    /// Create a new [`ProgLog`].
+    ///
+    /// The [`ProgLogBuilder`] should be preferred.
     pub fn new(name: String, noun: String, verb: String, unit: u64, level: Level) -> Self {
         Self {
             counter: Arc::new(AtomicU64::new(0)),
@@ -82,10 +124,15 @@ impl ProgLog {
         }
     }
 
+    /// Get the number of items seen so far.
+    ///
+    /// This should be treated with some caution as it is using the
+    /// atomic load with [`Ordering::Relaxed`].
     pub fn seen(&self) -> u64 {
         self.counter.load(Ordering::Relaxed)
     }
 
+    /// Increment the progress logger by 1 and check if a new message should be emitted.
     pub fn record(&self) {
         let prev = self.counter.fetch_add(1, Ordering::Relaxed);
         let total = prev + 1;
@@ -101,6 +148,25 @@ impl ProgLog {
         }
     }
 
+    /// Increment the progress logger by 1 and check if a new message should be emitted.
+    ///
+    /// The returned displayable from the passed in closure will be appended to the log message.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use proglog::ProgLogBuilder;
+    ///
+    /// // Note a `log` backend needs to be globally initialized first
+    /// env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    ///
+    /// let logger = ProgLogBuilder::new().build();
+    /// for i in 0..10_000 {
+    ///     logger.record_with(|| format!("Logged item: {}", i));
+    /// }
+    /// // The logger will flush when it is dropped, writing a final progress message no mater the count.
+    /// // Alternatively you can call .flush() or .flush_with().
+    /// ```
     pub fn record_with<T, F>(&self, f: F)
     where
         F: Fn() -> T,
@@ -121,6 +187,10 @@ impl ProgLog {
         }
     }
 
+    /// Force the output of a log message, including the output of the input closure.
+    ///
+    /// This does not increment the counter.
+    /// This does not close the logger.
     pub fn flush_with<T, F>(&self, f: F)
     where
         F: Fn() -> T,
@@ -140,6 +210,10 @@ impl ProgLog {
         }
     }
 
+    /// Force the output of a log message.
+    ///
+    /// This does not increment the counter.
+    /// This does not close the logger.
     pub fn flush(&self) {
         let total = self.counter.load(Ordering::Relaxed);
         if total % self.unit != 0 {
@@ -156,6 +230,7 @@ impl ProgLog {
 }
 
 impl Drop for ProgLog {
+    /// Drop the logger, calling flush before dropping.
     fn drop(&mut self) {
         self.flush();
     }
@@ -174,18 +249,18 @@ impl ProgLogBuilder {
         Self::default()
     }
 
-    pub fn name(mut self, name: String) -> Self {
-        self.name = name;
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
         self
     }
 
-    pub fn noun(mut self, noun: String) -> Self {
-        self.noun = noun;
+    pub fn noun(mut self, noun: impl Into<String>) -> Self {
+        self.noun = noun.into();
         self
     }
 
-    pub fn verb(mut self, verb: String) -> Self {
-        self.verb = verb;
+    pub fn verb(mut self, verb: impl Into<String>) -> Self {
+        self.verb = verb.into();
         self
     }
 

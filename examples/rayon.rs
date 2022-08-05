@@ -30,9 +30,9 @@ struct Line {
 fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let journal = ProgLogBuilder::new()
-        .name(String::from("rayon-ex"))
-        .noun(String::from("records"))
-        .verb(String::from("Processed"))
+        .name("rayon-ex")
+        .noun("records")
+        .verb("Processed")
         .unit(1_000_000)
         .level(log::Level::Info)
         .build();
