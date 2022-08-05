@@ -61,3 +61,8 @@ The tradeoff made is for speed of incrementing so this can be put in hot loops o
 ```bash
 cargo test
 ```
+
+## Direct Inspirations
+
+- The ProgressLogger found in [fgpyo](https://github.com/fulcrumgenomics/fgpyo/)
+- The ProgressLogger in [fgbio](https://github.com/fulcrumgenomics/fgbio/)
