@@ -133,10 +133,12 @@ impl ProgLog {
     }
 
     /// Increment the progress logger by 1 and check if a new message should be emitted.
-    pub fn record(&self) {
+    pub fn record(&self) -> bool {
         let prev = self.counter.fetch_add(1, Ordering::Relaxed);
         let total = prev + 1;
-        if total % self.unit == 0 {
+        if total % self.unit != 0 { 
+            false 
+        } else {
             log!(
                 self.level,
                 "[{name}] {verb} {seen} {noun}",
@@ -145,6 +147,7 @@ impl ProgLog {
                 seen = total,
                 noun = &self.noun
             )
+            true
         }
     }
 
