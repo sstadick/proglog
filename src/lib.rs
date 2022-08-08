@@ -34,7 +34,17 @@
 //! }
 //! // The logger will flush when it is dropped, writing a final progress message no mater the count.
 //! // Alternatively you can call .flush() or .flush_with().
+//!
+//!
+//! # Features
+//!
+//! ## `pretty_counts`
+//!
+//! The `pretty_counts` features turns on the ability to format the numbers in the log messages.
+//! Set the [`ProgLogBuilder::count_formatter`] to one of the [`CountFormatterKind`]s and numbers will
+//! be formatted accordingly. i.e. `100000000` -> `100_000_000` with [`CountFormatterKind::Underscore`].
 //! ```
+#![deny(missing_docs, unsafe_code)]
 use log::{log, Level};
 use std::{
     fmt::Display,
@@ -43,12 +53,48 @@ use std::{
         Arc,
     },
 };
+#[cfg(feature = "pretty_counts")]
+use thousands::{
+    policies::{COMMA_SEPARATOR, DOT_SEPARATOR, HEX_FOUR, SPACE_SEPARATOR, UNDERSCORE_SEPARATOR},
+    Separable,
+};
 
 static DEFAULT_NAME: &str = "proglog";
 static DEFAULT_NOUN: &str = "records";
 static DEFAULT_VERB: &str = "Processed";
 static DEFAULT_UNIT: u64 = 100_000;
 static DEFAULT_LEVEL: Level = Level::Info;
+
+/// The types of formatting separators that can be applied to counts.
+#[cfg(feature = "pretty_counts")]
+pub enum CountFormatterKind {
+    /// Delimit counter with a `,`.
+    Comma,
+    /// Delimit counter with a `.`.
+    Dot,
+    /// Delimit counter with a ` ` every four hexadecimal digits.
+    HexFour,
+    /// Delimit counter with a ` `.
+    Space,
+    /// Delimit counter with an `_`.
+    Underscore,
+    /// Don't delimit counter.
+    Nothing,
+}
+
+#[cfg(feature = "pretty_counts")]
+impl CountFormatterKind {
+    fn fmt(&self, count: u64) -> String {
+        match self {
+            CountFormatterKind::Nothing => count.to_string(),
+            CountFormatterKind::Comma => count.separate_by_policy(COMMA_SEPARATOR),
+            CountFormatterKind::Dot => count.separate_by_policy(DOT_SEPARATOR),
+            CountFormatterKind::HexFour => count.separate_by_policy(HEX_FOUR),
+            CountFormatterKind::Space => count.separate_by_policy(SPACE_SEPARATOR),
+            CountFormatterKind::Underscore => count.separate_by_policy(UNDERSCORE_SEPARATOR),
+        }
+    }
+}
 
 /// [`ProgLog`] is the the progress logger.
 ///
@@ -93,6 +139,9 @@ pub struct ProgLog {
     unit: u64,
     /// The [`log::Level`] at which to emit log messages.
     level: Level,
+    /// The formatter to use for outputting the current count.
+    #[cfg(feature = "pretty_counts")]
+    count_formatter: CountFormatterKind,
 }
 
 impl Default for ProgLog {
@@ -105,6 +154,8 @@ impl Default for ProgLog {
             verb: String::from(DEFAULT_VERB),
             unit: DEFAULT_UNIT,
             level: DEFAULT_LEVEL,
+            #[cfg(feature = "pretty_counts")]
+            count_formatter: CountFormatterKind::Nothing,
         }
     }
 }
@@ -113,7 +164,15 @@ impl ProgLog {
     /// Create a new [`ProgLog`].
     ///
     /// The [`ProgLogBuilder`] should be preferred.
-    pub fn new(name: String, noun: String, verb: String, unit: u64, level: Level) -> Self {
+    #[allow(clippy::must_use_candidate)]
+    pub fn new(
+        name: String,
+        noun: String,
+        verb: String,
+        unit: u64,
+        level: Level,
+        #[cfg(feature = "pretty_counts")] count_formatter: CountFormatterKind,
+    ) -> Self {
         Self {
             counter: Arc::new(AtomicU64::new(0)),
             name,
@@ -121,6 +180,8 @@ impl ProgLog {
             verb,
             unit,
             level,
+            #[cfg(feature = "pretty_counts")]
+            count_formatter,
         }
     }
 
@@ -132,11 +193,22 @@ impl ProgLog {
         self.counter.load(Ordering::Relaxed)
     }
 
-    /// Increment the progress logger by 1 and check if a new message should be emitted.
-    pub fn record(&self) {
-        let prev = self.counter.fetch_add(1, Ordering::Relaxed);
-        let total = prev + 1;
-        if total % self.unit == 0 {
+    /// Helper method to pull out log formatting .
+    #[inline]
+    fn log_it(&self, total: u64) {
+        #[cfg(feature = "pretty_counts")]
+        {
+            log!(
+                self.level,
+                "[{name}] {verb} {seen} {noun}",
+                name = &self.name,
+                verb = &self.verb,
+                seen = self.count_formatter.fmt(total),
+                noun = &self.noun
+            );
+        }
+        #[cfg(not(feature = "pretty_counts"))]
+        {
             log!(
                 self.level,
                 "[{name}] {verb} {seen} {noun}",
@@ -144,13 +216,63 @@ impl ProgLog {
                 verb = &self.verb,
                 seen = total,
                 noun = &self.noun
-            )
+            );
+        }
+    }
+
+    /// Helper method to pull out log formatting with custom user closure.
+    #[inline]
+    fn log_it_with<F, T>(&self, f: F, total: u64)
+    where
+        F: Fn() -> T,
+        T: Display,
+    {
+        #[cfg(feature = "pretty_counts")]
+        {
+            log!(
+                self.level,
+                "[{name}] {verb} {seen} {noun}: {extra}",
+                name = &self.name,
+                verb = &self.verb,
+                seen = self.count_formatter.fmt(total),
+                noun = &self.noun,
+                extra = f()
+            );
+        }
+
+        #[cfg(not(feature = "pretty_counts"))]
+        {
+            log!(
+                self.level,
+                "[{name}] {verb} {seen} {noun}: {extra}",
+                name = &self.name,
+                verb = &self.verb,
+                seen = total,
+                noun = &self.noun,
+                extra = f()
+            );
+        }
+    }
+
+    /// Increment the progress logger by 1 and check if a new message should be emitted.
+    ///
+    /// Returns `true` if total seen after incrementing is a multiple of `unit`.
+    pub fn record(&self) -> bool {
+        let prev = self.counter.fetch_add(1, Ordering::Relaxed);
+        let total = prev + 1;
+        if total % self.unit == 0 {
+            self.log_it(total);
+            true
+        } else {
+            false
         }
     }
 
     /// Increment the progress logger by 1 and check if a new message should be emitted.
     ///
     /// The returned displayable from the passed in closure will be appended to the log message.
+    ///
+    /// Returns `true` if total seen after incrementing is a multiple of `unit`.
     ///
     /// # Example
     ///
@@ -167,7 +289,7 @@ impl ProgLog {
     /// // The logger will flush when it is dropped, writing a final progress message no mater the count.
     /// // Alternatively you can call .flush() or .flush_with().
     /// ```
-    pub fn record_with<T, F>(&self, f: F)
+    pub fn record_with<T, F>(&self, f: F) -> bool
     where
         F: Fn() -> T,
         T: Display,
@@ -175,15 +297,10 @@ impl ProgLog {
         let prev = self.counter.fetch_add(1, Ordering::Relaxed);
         let total = prev + 1;
         if total % self.unit == 0 {
-            log!(
-                self.level,
-                "[{name}] {verb} {seen} {noun}: {extra}",
-                name = &self.name,
-                verb = &self.verb,
-                seen = total,
-                noun = &self.noun,
-                extra = f()
-            )
+            self.log_it_with(f, total);
+            true
+        } else {
+            false
         }
     }
 
@@ -198,15 +315,7 @@ impl ProgLog {
     {
         let total = self.counter.load(Ordering::Relaxed);
         if total % self.unit != 0 {
-            log!(
-                self.level,
-                "[{name}] {verb} {seen} {noun}: {extra}",
-                name = &self.name,
-                verb = &self.verb,
-                seen = total,
-                noun = &self.noun,
-                extra = f()
-            )
+            self.log_it_with(f, total);
         }
     }
 
@@ -217,14 +326,7 @@ impl ProgLog {
     pub fn flush(&self) {
         let total = self.counter.load(Ordering::Relaxed);
         if total % self.unit != 0 {
-            log!(
-                self.level,
-                "[{name}] {verb} {seen} {noun}",
-                name = &self.name,
-                verb = &self.verb,
-                seen = total,
-                noun = &self.noun
-            )
+            self.log_it(total);
         }
     }
 }
@@ -243,6 +345,9 @@ pub struct ProgLogBuilder {
     verb: String,
     unit: u64,
     level: Level,
+    /// The formatter to use for outputting the current count.
+    #[cfg(feature = "pretty_counts")]
+    count_formatter: CountFormatterKind,
 }
 
 impl ProgLogBuilder {
@@ -281,9 +386,24 @@ impl ProgLogBuilder {
         self
     }
 
+    /// The formatter to use for outputting the current count.
+    #[cfg(feature = "pretty_counts")]
+    pub fn count_formatter(mut self, formatter: CountFormatterKind) -> Self {
+        self.count_formatter = formatter;
+        self
+    }
+
     /// Build the [`ProgLog`] instance.
     pub fn build(self) -> ProgLog {
-        ProgLog::new(self.name, self.noun, self.verb, self.unit, self.level)
+        ProgLog::new(
+            self.name,
+            self.noun,
+            self.verb,
+            self.unit,
+            self.level,
+            #[cfg(feature = "pretty_counts")]
+            self.count_formatter,
+        )
     }
 }
 
@@ -295,6 +415,8 @@ impl Default for ProgLogBuilder {
             verb: String::from(DEFAULT_VERB),
             unit: DEFAULT_UNIT,
             level: DEFAULT_LEVEL,
+            #[cfg(feature = "pretty_counts")]
+            count_formatter: CountFormatterKind::Nothing,
         }
     }
 }
@@ -323,12 +445,17 @@ mod tests {
         assert_eq!(logger.len(), 0);
         test_messages_rayon(&mut logger);
         assert_eq!(logger.len(), 0);
+        #[cfg(feature = "pretty_counts")]
+        {
+            test_pretty_counts(&mut logger);
+            assert_eq!(logger.len(), 0);
+        }
     }
 
     fn test_simple_case(logger: &mut Logger) {
         let my_logger = ProgLogBuilder::new().build();
         for _i in 0..101 {
-            my_logger.record()
+            my_logger.record();
         }
         assert_eq!(my_logger.seen(), 101);
         drain_logger(logger);
@@ -382,5 +509,24 @@ mod tests {
             assert!(found.args().ends_with(&msg.to_string()));
         }
         drain_logger(logger);
+    }
+
+    #[cfg(feature = "pretty_counts")]
+    fn test_pretty_counts(logger: &mut Logger) {
+        let my_logger = ProgLogBuilder::new()
+            .unit(100_000)
+            .count_formatter(CountFormatterKind::Underscore)
+            .build();
+        for _ in 0..99_999 {
+            my_logger.record_with(|| "This is a test");
+        }
+        assert_eq!(logger.len(), 0);
+        my_logger.record_with(|| "The 100,000th");
+        assert_eq!(logger.len(), 1);
+        assert_eq!(
+            logger.pop().unwrap().args(),
+            "[proglog] Processed 100_000 records: The 100,000th"
+        );
+        drain_logger(logger)
     }
 }
