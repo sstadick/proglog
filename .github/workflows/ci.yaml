@@ -82,5 +82,5 @@ jobs:
       - name: Run tests
         run: cargo test --verbose --all-features
 
-      - name: Run tests: default features only
+      - name: Run tests- default features only
         run: cargo test --verbose
