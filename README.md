@@ -56,6 +56,15 @@ So thread A could hit the first `unit` break, thread B could hit the second poin
 Having sufficiently large `unit` will mitigate this, but you should not be depending on the log output order here.
 The tradeoff made is for speed of incrementing so this can be put in hot loops over guaranteed output ordering.
 
+
+## Features
+
+### `pretty_counts`
+
+The `pretty_counts` features turns on the ability to format the numbers in the log messages.
+Set the [`ProgLogBuilder::count_formatter`] to one of the [`CountFormatterKind`]s and numbers will
+be formatted accordingly. i.e. `100000000` -> `100_000_000` with [`CountFormatterKind::Underscore`].
+
 ## Tests
 
 ```bash
