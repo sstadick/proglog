@@ -423,6 +423,8 @@ impl Default for ProgLogBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
     use logtest::Logger;
     use rayon::prelude::*;
@@ -504,10 +506,30 @@ mod tests {
 
         assert_eq!(logger.len(), 10);
 
+        let mut expected: HashSet<String> = HashSet::new();
         for msg in (100_000..=1_000_000).step_by(100_000) {
-            let found = logger.pop().unwrap();
-            assert!(found.args().ends_with(&msg.to_string()));
+            expected.insert(format!(
+                "[proglog] Processed {} records: Logged {}",
+                msg, msg
+            ));
         }
+
+        let len_expected = expected.len();
+        for _ in 0..len_expected {
+            let found = logger.pop().unwrap();
+            assert!(
+                expected.remove(found.args()),
+                "`{}` not in expected",
+                found.args()
+            );
+        }
+        assert_eq!(
+            expected.len(),
+            0,
+            "Not all expected were found: {:?}",
+            expected
+        );
+
         drain_logger(logger);
     }
 
