@@ -34,7 +34,7 @@
 //! }
 //! // The logger will flush when it is dropped, writing a final progress message no mater the count.
 //! // Alternatively you can call .flush() or .flush_with().
-//!
+//! ```
 //!
 //! # Features
 //!
