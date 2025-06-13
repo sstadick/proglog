@@ -254,11 +254,19 @@ impl ProgLog {
         }
     }
 
+    fn count(&self) -> u64 {
+        self.counter.load(Ordering::Relaxed)
+    }
+
+    fn fetch_add(&self, count: u64) -> u64 {
+        self.counter.fetch_add(count, Ordering::Relaxed)
+    }
+
     /// Increment the progress logger by 1 and check if a new message should be emitted.
     ///
     /// Returns `true` if total seen after incrementing is a multiple of `unit`.
     pub fn record(&self) -> bool {
-        let prev = self.counter.fetch_add(1, Ordering::Relaxed);
+        let prev: u64 = self.fetch_add(1);
         let total = prev + 1;
         if total % self.unit == 0 {
             self.log_it(total);
@@ -266,6 +274,25 @@ impl ProgLog {
         } else {
             false
         }
+    }
+
+    /// Increment the progress logger by `count` and check if a new message should be emitted.
+    ///
+    /// Returns the number of additional `unit`s we've seen after incrementing.
+    pub fn record_count(&self, mut count: u64) -> usize {
+        let mut retval = 0usize;
+        while count > self.unit {
+            self.log_it(self.count() + self.unit);
+            retval += 1;
+            count -= self.unit;
+            self.fetch_add(self.unit);
+        }
+        if (count + (self.count() % self.unit)) > self.unit {
+            self.log_it(self.count() + count);
+            retval += 1;
+        }
+        self.fetch_add(count);
+        retval
     }
 
     /// Increment the progress logger by 1 and check if a new message should be emitted.
@@ -294,7 +321,7 @@ impl ProgLog {
         F: Fn() -> T,
         T: Display,
     {
-        let prev = self.counter.fetch_add(1, Ordering::Relaxed);
+        let prev = self.fetch_add(1);
         let total = prev + 1;
         if total % self.unit == 0 {
             self.log_it_with(f, total);
@@ -302,6 +329,30 @@ impl ProgLog {
         } else {
             false
         }
+    }
+    /// Increment the progress logger by `count` and check if a new message should be emitted.
+    ///
+    /// The returned displayable from the passed in closure will be appended to the log message.
+    ///
+    /// Returns the number of additional `unit`s we've seen after incrementing.
+    pub fn record_count_with<T, F>(&self, mut count: u64, f: F) -> usize
+    where
+        F: Fn() -> T,
+        T: Display,
+    {
+        let mut retval = 0usize;
+        while count > self.unit {
+            self.log_it_with(&f, self.count() + self.unit);
+            retval += 1;
+            count -= self.unit;
+            self.fetch_add(self.unit);
+        }
+        self.fetch_add(count);
+        if (count + (self.count() % self.unit)) > self.unit {
+            self.log_it_with(f, self.count() + count);
+            retval += 1;
+        }
+        retval
     }
 
     /// Force the output of a log message, including the output of the input closure.
@@ -313,7 +364,7 @@ impl ProgLog {
         F: Fn() -> T,
         T: Display,
     {
-        let total = self.counter.load(Ordering::Relaxed);
+        let total = self.count();
         if total % self.unit != 0 {
             self.log_it_with(f, total);
         }
@@ -324,7 +375,7 @@ impl ProgLog {
     /// This does not increment the counter.
     /// This does not close the logger.
     pub fn flush(&self) {
-        let total = self.counter.load(Ordering::Relaxed);
+        let total = self.count();
         if total % self.unit != 0 {
             self.log_it(total);
         }
@@ -447,6 +498,8 @@ mod tests {
         assert_eq!(logger.len(), 0);
         test_messages_rayon(&mut logger);
         assert_eq!(logger.len(), 0);
+        test_count(&mut logger);
+        test_messages_count(&mut logger);
         #[cfg(feature = "pretty_counts")]
         {
             test_pretty_counts(&mut logger);
@@ -463,6 +516,16 @@ mod tests {
         drain_logger(logger);
     }
 
+    fn test_count(logger: &mut Logger) {
+        let my_logger = ProgLogBuilder::new().unit(2).build();
+        for _i in 0..101 {
+            assert_eq!(my_logger.record_count(5), 2);
+        }
+        assert_eq!(my_logger.seen(), 505);
+        assert_eq!(logger.len(), 203);
+        drain_logger(logger);
+    }
+
     fn test_rayon(logger: &mut Logger) {
         let my_logger = ProgLogBuilder::new().build();
         (0..1_000_000).par_bridge().for_each(|_i| {
@@ -476,6 +539,14 @@ mod tests {
         let my_logger = ProgLogBuilder::new().unit(1).build();
         my_logger.record_with(|| "This is a test");
         assert_eq!(logger.len(), 1);
+        assert!(logger.pop().unwrap().args().ends_with("This is a test"));
+        drain_logger(logger);
+    }
+
+    fn test_messages_count(logger: &mut Logger) {
+        let my_logger = ProgLogBuilder::new().unit(2).build();
+        assert_eq!(my_logger.record_count_with(5, || "This is a test"), 2);
+        assert_eq!(logger.len(), 2);
         assert!(logger.pop().unwrap().args().ends_with("This is a test"));
         drain_logger(logger);
     }
