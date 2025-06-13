@@ -493,28 +493,50 @@ mod tests {
     }
 
     fn test_messages_rayon(logger: &mut Logger) {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .expect("Unable to create rayon global thread pool.");
         let my_logger = ProgLogBuilder::new().unit(100_000).build();
 
         // Note - it just so happens the log messages are in the correct order here,
         // if the loop is tight enough, and the unit is too small, and depending how
         // rayon breaks things up the logger internal queue / print buffer can get
         // out of order.
-        (1..=1_000_000).par_bridge().for_each(|i| {
-            my_logger.record_with(|| format!("Logged {}", i));
+        pool.install(|| {
+            (1..=1_000_000).par_bridge().for_each(|i| {
+                my_logger.record_with(|| format!("Logged {}", i));
+            });
         });
         assert_eq!(my_logger.seen(), 1_000_000);
 
         assert_eq!(logger.len(), 10);
 
         let mut expected: HashSet<String> = HashSet::new();
-        for msg in (100_000..=1_000_000).step_by(100_000) {
-            expected.insert(format!(
-                "[proglog] Processed {} records: Logged {}",
-                msg, msg
-            ));
+        let mut len_expected = 0;
+        let out_of_ordering = 10;
+        for msg in (100_000_usize..=1_000_000).step_by(100_000) {
+            len_expected += 1;
+            for i in 0..=out_of_ordering {
+                // Handle +- 1 for relaxed ordering
+                expected.insert(format!(
+                    "[proglog] Processed {} records: Logged {}",
+                    msg,
+                    msg + i
+                ));
+                expected.insert(format!(
+                    "[proglog] Processed {} records: Logged {}",
+                    msg,
+                    msg.saturating_sub(i)
+                ));
+            }
         }
+        assert_eq!(
+            logger.len(),
+            10,
+            "Didn't collect expected number of messages."
+        );
 
-        let len_expected = expected.len();
         for _ in 0..len_expected {
             let found = logger.pop().unwrap();
             assert!(
@@ -523,12 +545,6 @@ mod tests {
                 found.args()
             );
         }
-        assert_eq!(
-            expected.len(),
-            0,
-            "Not all expected were found: {:?}",
-            expected
-        );
 
         drain_logger(logger);
     }
