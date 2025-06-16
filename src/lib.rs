@@ -277,7 +277,7 @@ impl ProgLog {
     }
 
     /// Increment the progress logger by `count`, checking if new message(s) should be emitted.
-    /// This is equivalent to calling the `record` function `count` number of times.
+    /// Emits `count // unit` messages, there is no carry over of remainder counts between calls.
     ///
     /// Returns the number of additional `unit`s we've seen after incrementing.
     ///
@@ -339,6 +339,8 @@ impl ProgLog {
     /// The returned displayable from the passed in closure will be appended to each log message.
     ///
     /// Returns the number of additional `unit`s we've seen after incrementing.
+    ///
+    /// **Note**: Calling `record` 10 times with `unit` of 2 will emit 5 messages, but calling this with `count=5` twice will emit 4 messages.
     pub fn record_count_with<T, F>(&self, mut count: u64, f: F) -> usize
     where
         F: Fn() -> T,
