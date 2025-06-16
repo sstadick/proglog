@@ -280,6 +280,8 @@ impl ProgLog {
     /// This is equivalent to calling the `record` function `count` number of times.
     ///
     /// Returns the number of additional `unit`s we've seen after incrementing.
+    ///
+    /// **Note**: Calling `record` 10 times with `unit` of 2 will emit 5 messages, but calling this with `count=5` twice will emit 4 messages.
     pub fn record_count(&self, mut count: u64) -> usize {
         let mut retval = 0;
         while count > self.unit {
